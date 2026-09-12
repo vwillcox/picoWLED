@@ -926,7 +926,7 @@ WLED_GLOBAL JsonDocument *pDoc _INIT(&gDoc);
 #endif
 
 #ifdef WLED_DEBUG
-  #ifndef ESP8266
+  #if !defined(ESP8266) && !defined(ARDUINO_ARCH_RP2040)
   #include <rom/rtc.h>
   #endif
   #define DEBUG_PRINT(x) DEBUGOUT.print(x)

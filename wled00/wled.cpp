@@ -343,7 +343,9 @@ void WLED::loop()
       DEBUG_PRINTF_P(PSTR("Strip time[ms]:%u/%lu\n"), avgStripMillis/loops,   maxStripMillis);
     }
     strip.printSize();
-    server.printStatus(DEBUGOUT);
+    #ifndef ARDUINO_ARCH_RP2040
+    server.printStatus(DEBUGOUT); // AsyncWebServer::printStatus() is a WLED-fork-only debug extension, absent upstream
+    #endif
     loops = 0;
     maxLoopMillis = 0;
     maxUsermodMillis = 0;
