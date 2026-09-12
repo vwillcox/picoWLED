@@ -114,6 +114,7 @@
   #include <ESP8266mDNS.h> // arduino-pico's bundled LEAmDNS ships this exact header name/API (same "MDNS" global as ESP8266)
   #include <RPAsyncTCP.h>
   #include <LittleFS.h>
+  #include <Hash.h> // arduino-pico bundles the same Hash.h as ESP8266 (sha1() etc.)
   #include "compat_content_types_rp2040.h"
   #include "compat_rp2040.h"
   #ifndef OUTPUT_OPEN_DRAIN

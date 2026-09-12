@@ -7,6 +7,25 @@ Import("env")
 
 _ATTR = re.compile(r'\bDW_AT_(name|comp_dir)\b')
 
+# wled-* bundled libraries that compile to an empty translation unit (no debug-info
+# compile-unit for readelf to find) when their corresponding feature is disabled via
+# build flag. Without this, enabling e.g. WLED_DISABLE_ESPNOW on any platform - not just
+# RP2040, this was simply never exercised before - trips a false-positive "missing module"
+# error below, since the module is intentionally, correctly absent from the binary.
+_OPTIONAL_MODULE_DISABLE_FLAGS = {
+    "wled-espnow": "WLED_DISABLE_ESPNOW",
+}
+
+
+def has_def(cppdefs, name):
+    """ Returns true if a given name is set in a CPPDEFINES collection """
+    for f in cppdefs:
+        if isinstance(f, tuple):
+            f = f[0]
+        if f == name:
+            return True
+    return False
+
 
 def read_lines(p: Path):
     """ Read in the contents of a file for analysis """
@@ -165,7 +184,12 @@ def validate_map_file(source, target, env):
     # else - if there's no usermods found, don't generate a message.  If we're legitimately missing all entries, the error report on the
     # next line will trip; and if the usermod set is expected to be empty, then there's no need for yet another null message.
 
-    missing_modules = [modname for mdir, modname in modules.items() if mdir not in confirmed_modules]
+    cdefs = env["CPPDEFINES"]
+    missing_modules = [
+        modname for mdir, modname in modules.items()
+        if mdir not in confirmed_modules
+        and not (modname in _OPTIONAL_MODULE_DISABLE_FLAGS and has_def(cdefs, _OPTIONAL_MODULE_DISABLE_FLAGS[modname]))
+    ]
     if missing_modules:
         secho(
             f"ERROR: No symbols from {missing_modules} found in linked output!",

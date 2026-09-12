@@ -155,6 +155,30 @@ void sendDataWs(AsyncWebSocketClient * client)
   // the following may no longer be necessary as heap management has been fixed by @willmmiles in AWS
   size_t heap1 = getFreeHeapSize();
   DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+  #ifdef ARDUINO_ARCH_RP2040
+  // AsyncWebSocketBuffer (a value-type RAII wrapper) is a WLED/Aircoookie-fork-only class;
+  // upstream esp32async uses a pointer-based AsyncWebSocketMessageBuffer + ws.makeBuffer(),
+  // see https://github.com/esp32async/ESPAsyncWebServer docs/websockets.md
+  AsyncWebSocketMessageBuffer *buffer = ws.makeBuffer(len);
+  size_t heap2 = 0; // no known heap-fragmentation issue to guard against on this platform
+  if (!buffer || heap1-heap2<len) {
+    releaseJSONBufferLock();
+    DEBUG_PRINTLN(F("WS buffer allocation failed."));
+    ws.closeAll(1013); //code 1013 = temporary overload, try again later
+    ws.cleanupClients(0); //disconnect all clients to release memory
+    return; //out of memory
+  }
+  serializeJson(*pDoc, (char *)buffer->get(), len);
+
+  DEBUG_PRINT(F("Sending WS data "));
+  if (client) {
+    DEBUG_PRINTLN(F("to a single client."));
+    client->text(buffer);
+  } else {
+    DEBUG_PRINTLN(F("to multiple clients."));
+    ws.textAll(buffer);
+  }
+  #else
   AsyncWebSocketBuffer buffer(len);
   #ifdef ESP8266
   size_t heap2 = getFreeHeapSize();
@@ -179,6 +203,7 @@ void sendDataWs(AsyncWebSocketClient * client)
     DEBUG_PRINTLN(F("to multiple clients."));
     ws.textAll(std::move(buffer));
   }
+  #endif
 
   releaseJSONBufferLock();
 }
@@ -186,7 +211,11 @@ void sendDataWs(AsyncWebSocketClient * client)
 static bool sendLiveLedsWs(uint32_t wsClient)
 {
   AsyncWebSocketClient * wsc = ws.client(wsClient);
+  #ifdef ARDUINO_ARCH_RP2040
+  if (!wsc || wsc->queueLen() > 0) return false; //only send if queue free
+  #else
   if (!wsc || wsc->queueLength() > 0) return false; //only send if queue free
+  #endif
 
   size_t used = strip.getLengthTotal();
 #ifdef ESP8266
@@ -208,9 +237,15 @@ static bool sendLiveLedsWs(uint32_t wsClient)
 #endif
   size_t bufSize = pos + (used/n)*3;
 
+  #ifdef ARDUINO_ARCH_RP2040
+  AsyncWebSocketMessageBuffer *wsBuf = ws.makeBuffer(bufSize);
+  if (!wsBuf) return false; //out of memory
+  uint8_t* buffer = reinterpret_cast<uint8_t*>(wsBuf->get());
+  #else
   AsyncWebSocketBuffer wsBuf(bufSize);
   if (!wsBuf) return false; //out of memory
   uint8_t* buffer = reinterpret_cast<uint8_t*>(wsBuf.data());
+  #endif
   if (!buffer) return false; //out of memory
   buffer[0] = 'L';
   buffer[1] = 1; //version
@@ -238,7 +273,11 @@ static bool sendLiveLedsWs(uint32_t wsClient)
     buffer[pos++] = bri ? qadd8(w, b) : 0; //B
   }
 
+  #ifdef ARDUINO_ARCH_RP2040
+  wsc->binary(wsBuf);
+  #else
   wsc->binary(std::move(wsBuf));
+  #endif
   return true;
 }
 

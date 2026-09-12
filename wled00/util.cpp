@@ -7,6 +7,7 @@
 #include <Hash.h>            // for SHA1 on ESP8266
 #elif defined(ARDUINO_ARCH_RP2040)
 // no Update.h/rollback, efuse, chip-info, or hardware SHA1 equivalents wired up yet on this platform
+#include "pico/unique_id.h" // for generateDeviceFingerprint()
 #else
 #include <Update.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
@@ -291,9 +292,17 @@ bool requestJSONBufferLock(uint8_t moduleID)
     unsigned long now = millis();
     while (jsonBufferLock && (millis()-now < 250)) delay(1); // wait for fraction for buffer lock
   }
+#elif defined(ARDUINO_ARCH_RP2040)
+  // arduino-pico's default (non-FreeRTOS) execution model is a single cooperative loop, with
+  // no distinct "system context" callback restriction the way ESP8266's SDK has - delay()/
+  // yield() are always safe to call here, so there's no can_yield()-style guard needed.
+  {
+    unsigned long now = millis();
+    while (jsonBufferLock && (millis()-now < 250)) delay(1); // wait for fraction for buffer lock
+  }
 #else
   #error Unsupported task framework - fix requestJSONBufferLock
-#endif  
+#endif
   // If the lock is still held - by us, or by another task
   if (jsonBufferLock) {
     DEBUG_PRINTF_P(PSTR("ERROR: Locking JSON buffer (%d) failed! (still locked by %d)\n"), moduleID, jsonBufferLock);
@@ -835,6 +844,31 @@ void *d_realloc_malloc(void *ptr, size_t size) {
   free(ptr);
   return d_malloc(size);
 }
+#elif defined(ARDUINO_ARCH_RP2040)
+// no heap_caps/PSRAM/RTC-RAM concept on this platform (single unified RAM) - same simple
+// treatment as ESP8266.
+static void *validateFreeHeap(void *buffer) {
+  if (getFreeHeapSize() < MIN_HEAP_SIZE) {
+    free(buffer);
+    return nullptr;
+  }
+  return buffer;
+}
+
+void *d_malloc(size_t size) {
+  void *buffer = malloc(size);
+  return validateFreeHeap(buffer);
+}
+
+void *d_calloc(size_t count, size_t size) {
+  void *buffer = calloc(count, size);
+  return validateFreeHeap(buffer);
+}
+
+void *d_realloc_malloc(void *ptr, size_t size) {
+  free(ptr);
+  return d_malloc(size);
+}
 #else
 static void *validateFreeHeap(void *buffer) {
   // make sure there is enough free heap left if buffer was allocated in DRAM region, free it if not
@@ -1015,6 +1049,9 @@ static inline ResetReason rebootReason() {
 
 static inline uint32_t getRtcMillis() { return system_get_rtc_time() / 160; };  // rtc ticks ~160000Hz
 
+#elif defined(ARDUINO_ARCH_RP2040)
+// Bootloop detection is not implemented on this platform yet - see the #else branch of
+// handleBootLoop() below for why. No bl_*/rebootReason()/getRtcMillis() needed here.
 #else
 // variables in RTC_NOINIT memory persist between reboots (but not on hardware reset)
 RTC_NOINIT_ATTR static uint32_t bl_last_boottime;
@@ -1044,6 +1081,7 @@ void bootloopCheckOTA() { bl_actiontracker = BOOTLOOP_ACTION_OTA; } // swap boot
 
 #endif
 
+#ifndef ARDUINO_ARCH_RP2040
 // detect bootloop by checking the reset reason and the time since last boot
 static bool detectBootLoop() {
   uint32_t rtctime = getRtcMillis();
@@ -1123,6 +1161,16 @@ void handleBootLoop() {
 
   ESP.restart(); // restart cleanly and don't wait for another crash
 }
+#else // ARDUINO_ARCH_RP2040
+// Bootloop detection relies on memory that persists across a soft reset (but not a
+// power-cycle) combined with a monotonic clock from the same always-on domain, to measure
+// "time since last boot" across a reset (ESP32: RTC_NOINIT_ATTR + esp_rtc_get_time_us();
+// ESP8266: RTC user memory + system_get_rtc_time()). RP2040/RP2350 likely has an equivalent
+// (watchdog scratch registers for the persistent storage, the RTC peripheral for timing),
+// but wiring it up correctly needs real hardware to verify against - not done here rather
+// than guess at unverified behavior. Bootloop recovery is simply not available yet.
+void handleBootLoop() {}
+#endif
 
 /*
  * Fixed point integer based Perlin noise functions by @dedehai
@@ -1303,8 +1351,8 @@ uint8_t perlin8(uint16_t x, uint16_t y, uint16_t z) {
 
 // Platform-agnostic SHA1 computation from String input
 String computeSHA1(const String& input) {
-  #ifdef ESP8266
-    return sha1(input); // ESP8266 has built-in sha1() function
+  #if defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
+    return sha1(input); // ESP8266 and arduino-pico both bundle the same Hash.h with a built-in sha1() function
   #else
     // ESP32: Compute SHA1 hash using mbedtls
     unsigned char shaResult[20]; // SHA1 produces 20 bytes
@@ -1529,6 +1577,23 @@ String generateDeviceFingerprint() {
   fp[0] ^= chip_info.features | chip_info.cores << 16; // some extra salt
   fp[1] ^= ESP.getFlashSourceFrequencyMHz() | ESP.getFlashClockDivider() << 8 ;
   #endif
+  char fp_string[17];  // 16 hex chars + null terminator
+  sprintf(fp_string, "%08X%08X", fp[1], fp[0]);
+  return String(fp_string);
+}
+#elif defined(ARDUINO_ARCH_RP2040)
+String generateDeviceFingerprint() {
+  uint32_t fp[2] = {0, 0}; // create 64 bit fingerprint
+  WiFi.macAddress((uint8_t*)&fp); // use MAC address as fingerprint base
+  // no flash-chip-id/size/vendor-id API on this platform; use the flash's genuine
+  // hardware-unique 64-bit id instead (pico-sdk, backed by the flash chip's own unique id)
+  pico_unique_board_id_t boardId;
+  pico_get_unique_board_id(&boardId);
+  uint32_t idLow, idHigh;
+  memcpy(&idLow,  &boardId.id[0], sizeof(idLow));
+  memcpy(&idHigh, &boardId.id[4], sizeof(idHigh));
+  fp[0] ^= idLow;
+  fp[1] ^= idHigh;
   char fp_string[17];  // 16 hex chars + null terminator
   sprintf(fp_string, "%08X%08X", fp[1], fp[0]);
   return String(fp_string);

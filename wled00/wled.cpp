@@ -445,6 +445,9 @@ void WLED::setup()
   #endif
   DEBUG_PRINTF_P(PSTR(", speed %u MHz.\n"), ESP.getFlashChipSpeed()/1000000);
 
+#elif defined(ARDUINO_ARCH_RP2040)
+  DEBUG_PRINTF_P(PSTR("rp2040/rp2350 (arduino-pico %s) @ %u MHz.\n"), ARDUINO_PICO_VERSION_STR, F_CPU/1000000);
+  // no flash-chip-mode/speed/size API on this platform
 #else
   DEBUG_PRINTF_P(PSTR("esp8266 @ %u MHz.\nCore: %s\n"), ESP.getCpuFreqMHz(), ESP.getCoreVersion());
   DEBUG_PRINTF_P(PSTR("FLASH: %u MB\n"), (ESP.getFlashChipSize()/1024)/1024);

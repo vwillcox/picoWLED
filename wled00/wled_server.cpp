@@ -110,7 +110,7 @@ static bool handleIfNoneMatchCacheHeader(AsyncWebServerRequest *request, int cod
   // Only send 304 (Not Modified) if response code is 200 (OK)
   if (code != 200) return false;
 
-  AsyncWebHeader *header = request->getHeader(F("If-None-Match"));
+  const AsyncWebHeader *header = request->getHeader(F("If-None-Match"));
   char etag[32];
   generateEtag(etag, eTagSuffix);
   if (header && header->value() == etag) {
@@ -240,7 +240,7 @@ static const char _edit_htm[] PROGMEM = "/edit.htm";
 static void createEditHandler() {
   if (editHandler != nullptr) server.removeHandler(editHandler);
 
-  editHandler = &server.on(F("/edit"), static_cast<WebRequestMethod>(HTTP_GET), [](AsyncWebServerRequest *request) {
+  editHandler = &server.on(String(F("/edit")), static_cast<WebRequestMethod>(HTTP_GET), [](AsyncWebServerRequest *request) {
     // PIN check for GET/DELETE, for POST it is done in handleUpload()
     if (!correctPIN) {
       serveMessage(request, 401, FPSTR(s_accessdenied), FPSTR(s_unlock_cfg), 254);
@@ -355,12 +355,12 @@ void initServer()
 
 #ifdef WLED_ENABLE_WEBSOCKETS
   #ifndef WLED_DISABLE_2D 
-  server.on(F("/liveview2D"), HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on(String(F("/liveview2D")), HTTP_GET, [](AsyncWebServerRequest *request) {
     handleStaticContent(request, "", 200, FPSTR(CONTENT_TYPE_HTML), PAGE_liveviewws2D, PAGE_liveviewws2D_length);
   });
   #endif
 #endif
-  server.on(F("/liveview"), HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on(String(F("/liveview")), HTTP_GET, [](AsyncWebServerRequest *request) {
     handleStaticContent(request, "", 200, FPSTR(CONTENT_TYPE_HTML), PAGE_liveview, PAGE_liveview_length);
   });
 
@@ -379,7 +379,7 @@ void initServer()
 #endif
 
   //settings page
-  server.on(F("/settings"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/settings")), HTTP_GET, [](AsyncWebServerRequest *request){
     serveSettings(request);
   });
 
@@ -401,16 +401,16 @@ void initServer()
     request->send(response);
   });
 
-  server.on(F("/welcome"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/welcome")), HTTP_GET, [](AsyncWebServerRequest *request){
     serveSettings(request);
   });
 
-  server.on(F("/reset"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/reset")), HTTP_GET, [](AsyncWebServerRequest *request){
     serveMessage(request, 200, FPSTR(s_rebooting), F("Please wait ~10 seconds."), 131);
     doReboot = true;
   });
 
-  server.on(F("/settings"), HTTP_POST, [](AsyncWebServerRequest *request){
+  server.on(String(F("/settings")), HTTP_POST, [](AsyncWebServerRequest *request){
     serveSettings(request, true);
   });
 
@@ -476,15 +476,15 @@ void initServer()
   }, JSON_BUFFER_SIZE);
   server.addHandler(handler);
 
-  server.on(F("/version"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/version")), HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, FPSTR(CONTENT_TYPE_PLAIN), (String)VERSION);
   });
 
-  server.on(F("/uptime"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/uptime")), HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, FPSTR(CONTENT_TYPE_PLAIN), (String)millis());
   });
 
-  server.on(F("/freeheap"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/freeheap")), HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, FPSTR(CONTENT_TYPE_PLAIN), (String)getFreeHeapSize());
   });
 
@@ -494,11 +494,11 @@ void initServer()
   });
 #endif
 
-  server.on(F("/teapot"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/teapot")), HTTP_GET, [](AsyncWebServerRequest *request){
     serveMessage(request, 418, F("418. I'm a teapot."), F("(Tangible Embedded Advanced Project Of Twinkling)"), 254);
   });
 
-  server.on(F("/upload"), HTTP_POST, [](AsyncWebServerRequest *request) {},
+  server.on(String(F("/upload")), HTTP_POST, [](AsyncWebServerRequest *request) {},
         [](AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data,
                       size_t len, bool isFinal) {handleUpload(request, filename, index, data, len, isFinal);}
   );
@@ -570,7 +570,7 @@ void initServer()
 
 #if defined(ARDUINO_ARCH_ESP32) && !defined(WLED_DISABLE_OTA)
   // ESP32 bootloader update endpoint
-  server.on(F("/updatebootloader"), HTTP_POST, [](AsyncWebServerRequest *request){
+  server.on(String(F("/updatebootloader")), HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->_tempObject) {
       auto bootloader_result = getBootloaderOTAResult(request);
       if (bootloader_result.first) {
@@ -616,7 +616,7 @@ void initServer()
 #endif
 
 #ifdef WLED_ENABLE_DMX
-  server.on(F("/dmxmap"), HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on(String(F("/dmxmap")), HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, FPSTR(CONTENT_TYPE_HTML), PAGE_dmxmap, dmxProcessor);
   });
 #endif
