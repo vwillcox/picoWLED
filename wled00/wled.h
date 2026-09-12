@@ -77,8 +77,8 @@
 #include <Arduino.h>
 
 // buildenv sanity check
-#if !defined(ESP32) && !defined(ESP8266)
-#error neither ESP32 nor ESP8266 defined. Please fix your build environment.
+#if !defined(ESP32) && !defined(ESP8266) && !defined(ARDUINO_ARCH_RP2040)
+#error neither ESP32, ESP8266 nor ARDUINO_ARCH_RP2040 defined. Please fix your build environment.
 #endif
 #if defined(ESP8266) && (defined(ARDUINO_ARCH_ESP32) || defined(ESP32))
 #error both ESP8266 and ESP32/ARDUINO_ARCH_ESP32 defined. Please fix your build environment.
@@ -99,6 +99,43 @@
   {
   #include <user_interface.h>
   }
+#elif defined(ARDUINO_ARCH_RP2040)
+  // RP2040/RP2350 (arduino-pico core), e.g. Raspberry Pi Pico 2 W. EXPERIMENTAL.
+  // arduino-pico doesn't define PROGMEM/pgm_read_* by default (flash is memory-mapped,
+  // so there's no real AVR/ESP-style separate address space) - but ArduinoJson's F()
+  // support (ARDUINOJSON_ENABLE_PROGMEM) auto-detects based on those macros existing,
+  // and WLED's code relies heavily on F()+ArduinoJson throughout. This compat header
+  // (bundled by arduino-pico's ArduinoCore-API) defines them as plain pointer
+  // dereferences, which is correct for this platform's unified memory addressing.
+  #include <avr/pgmspace.h>
+  #include <WiFi.h>
+  // no ETH.h equivalent - wired ethernet is not supported on this platform
+  // no esp_wifi.h equivalent - ESP-IDF-specific advanced WiFi tuning is skipped
+  #include <ESP8266mDNS.h> // arduino-pico's bundled LEAmDNS ships this exact header name/API (same "MDNS" global as ESP8266)
+  #include <RPAsyncTCP.h>
+  #include <LittleFS.h>
+  #include "compat_content_types_rp2040.h"
+  #include "compat_rp2040.h"
+  #ifndef OUTPUT_OPEN_DRAIN
+    #define OUTPUT_OPEN_DRAIN OUTPUT_OPENDRAIN // arduino-pico spells this without the underscore
+  #endif
+  // ESP32/ESP-IDF WiFi scan sentinels and formatting macros arduino-pico doesn't provide.
+  // WiFi.scanComplete() on this platform returns -1 while running and the count when done
+  // (confirmed in lwIP_CYW43.cpp) - there's no distinct "failed" state, so WIFI_SCAN_FAILED
+  // is defined for source compatibility but will never actually be returned.
+  #ifndef WIFI_SCAN_RUNNING
+    #define WIFI_SCAN_RUNNING (-1)
+  #endif
+  #ifndef WIFI_SCAN_FAILED
+    #define WIFI_SCAN_FAILED (-2)
+  #endif
+  #ifndef MACSTR
+    #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
+  #endif
+  #ifndef MAC2STR
+    #define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
+  #endif
+  // no esp_task_wdt.h equivalent - see WLED_WATCHDOG_TIMEOUT handling for this platform
 #else // ESP32
   #include <HardwareSerial.h>  // ensure we have the correct "Serial" on new MCUs (depends on ARDUINO_USB_MODE and ARDUINO_USB_CDC_ON_BOOT)
   #include <WiFi.h>
@@ -130,7 +167,9 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
 #include <DNSServer.h>
-#include <SPIFFSEditor.h>
+#ifndef ARDUINO_ARCH_RP2040
+  #include <SPIFFSEditor.h> // vestigial: class is never instantiated; header not present in upstream esp32async/ESPAsyncWebServer used on RP2040
+#endif
 #include "src/dependencies/time/TimeLib.h"
 #include "src/dependencies/timezone/Timezone.h"
 #include "src/dependencies/toki/Toki.h"
@@ -236,11 +275,17 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator>;
   #define WLED_PIN ""
 #endif
 
-#ifndef SPIFFS_EDITOR_AIRCOOOKIE
+#if !defined(SPIFFS_EDITOR_AIRCOOOKIE) && !defined(ARDUINO_ARCH_RP2040)
   #error You are not using the Aircoookie fork of the ESPAsyncWebserver library.\
   Using upstream puts your WiFi password at risk of being served by the filesystem.\
   Comment out this error message to build regardless.
 #endif
+// Note for RP2040/RP2350: this platform uses upstream esp32async/ESPAsyncWebServer,
+// which has no SPIFFSEditor class (and WLED never instantiates one - grep confirms
+// zero call sites on any platform). The actual wsec.json protection this check
+// guards against lives in file.cpp's handleFileRead() (rejects any path containing
+// "sec") and wled_server.cpp's /edit handler (explicit "wsec" checks), both of
+// which are plain WLED code, platform- and web-server-fork-independent.
 
 #ifndef WLED_DISABLE_INFRARED
   #include <IRremoteESP8266.h>
@@ -784,7 +829,13 @@ WLED_GLOBAL bool ledStatusState _INIT(false); // the current LED state
 #endif
 
 // server library objects
+#ifdef ARDUINO_ARCH_RP2040
+// AsyncWebServer(port, queueLimits) is a WLED/Aircoookie-fork-only extension, absent from
+// upstream esp32async/ESPAsyncWebServer used here - fall back to the plain constructor.
+WLED_GLOBAL AsyncWebServer server _INIT_N(((80)));
+#else
 WLED_GLOBAL AsyncWebServer server _INIT_N(((80, {0, WLED_REQUEST_MAX_QUEUE, WLED_REQUEST_MIN_HEAP, WLED_REQUEST_HEAP_USAGE})));
+#endif
 #ifdef WLED_ENABLE_WEBSOCKETS
 WLED_GLOBAL AsyncWebSocket ws _INIT_N((("/ws")));
 #endif

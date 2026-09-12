@@ -29,6 +29,9 @@
 #ifdef ESP32
 #include <WiFi.h>
 #include <AsyncUDP.h>
+#elif defined(ARDUINO_ARCH_RP2040)
+#include <WiFi.h>
+#include <AsyncUDP.h>
 #elif defined (ESP8266)
 #include <ESPAsyncUDP.h>
 #include <ESP8266WiFi.h>

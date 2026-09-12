@@ -69,6 +69,16 @@ constexpr size_t  WLED_MAX_USERMOD_PALETTES     = WLED_USERMOD_PALETTE_ID_BASE -
   #define WLED_MAX_ANALOG_CHANNELS 5
   #define WLED_MAX_TIMERS 16                // reduced limit for ESP8266 due to memory constraints
   #define WLED_PLATFORM_ID 0         // used in UI to distinguish ESP types, needs a proper fix!
+#elif defined(ARDUINO_ARCH_RP2040)
+  // RP2040/RP2350: no RMT/I2S/LEDC peripherals (ESP-IDF concepts); LED buses use
+  // PIO instead (see BusPimoroniUnicornMatrix). No generic PIO digital-strip
+  // driver exists yet, so these are conservative placeholders, not a real limit.
+  #define WLED_MAX_DIGITAL_CHANNELS 4
+  #define WLED_MAX_RMT_CHANNELS 0
+  #define WLED_MAX_I2S_CHANNELS 0
+  #define WLED_MAX_ANALOG_CHANNELS 0        // no PWM analog LED driver implemented yet on this platform
+  #define WLED_MAX_TIMERS 16
+  #define WLED_PLATFORM_ID 5         // used in UI to distinguish ESP types, needs a proper fix!
 #else
   #if !defined(LEDC_CHANNEL_MAX) || !defined(LEDC_SPEED_MODE_MAX)
     #include "driver/ledc.h" // needed for analog/LEDC channel counts

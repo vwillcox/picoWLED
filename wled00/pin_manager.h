@@ -6,6 +6,8 @@
 
 #ifdef ESP8266
 #define WLED_NUM_PINS (GPIO_PIN_COUNT+1) // somehow they forgot GPIO 16 (0-16==17)
+#elif defined(ARDUINO_ARCH_RP2040)
+#define WLED_NUM_PINS 30 // RP2040 and RP2350A (Pico form-factor boards, incl. Pico 2 W) both expose GPIO0-29
 #else
 #define WLED_NUM_PINS (GPIO_PIN_COUNT)
 #endif

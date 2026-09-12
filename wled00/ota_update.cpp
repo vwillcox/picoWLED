@@ -1,6 +1,8 @@
 #include "ota_update.h"
 #include "wled.h"
 
+#ifndef ARDUINO_ARCH_RP2040
+
 #ifdef ESP32
 #include <esp_app_format.h>
 #include <esp_ota_ops.h>
@@ -430,6 +432,21 @@ void markOTAvalid() {
   }
   #endif
 }
+
+#else // ARDUINO_ARCH_RP2040: OTA is not implemented yet - arduino-pico has no Update.h/esp_ota_*
+      // equivalent wired up. All callers of these functions are already gated behind
+      // WLED_DISABLE_OTA (set for this platform in platformio.ini) except markOTAvalid(),
+      // which is called unconditionally at boot and just needs to safely no-op here.
+
+bool initOTA(AsyncWebServerRequest *request) { return false; }
+void setOTAReplied(AsyncWebServerRequest *request) {}
+std::pair<OTAResultStatus, String> getOTAResult(AsyncWebServerRequest* request) {
+  return { OTAResultStatus::Ready, F("OTA is not supported on this platform yet") };
+}
+void handleOTAData(AsyncWebServerRequest *request, size_t index, uint8_t *data, size_t len, bool isFinal) {}
+void markOTAvalid() {}
+
+#endif // ARDUINO_ARCH_RP2040
 
 #if defined(ARDUINO_ARCH_ESP32) && !defined(WLED_DISABLE_OTA)
 

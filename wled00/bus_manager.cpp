@@ -438,7 +438,7 @@ BusPwm::BusPwm(const BusConfig &bc)
     #ifdef ESP8266
     analogWriteRange((1<<_depth)-1);
     analogWriteFreq(_frequency);
-    #else
+    #elif defined(ARDUINO_ARCH_ESP32)
     // for 2 pin PWM CCT strip pinManager will make sure both LEDC channels are in the same speed group and sharing the same timer
     _ledcStart = PinManager::allocateLedc(numPins);
     if (_ledcStart == 255) { //no more free LEDC channels
@@ -448,13 +448,19 @@ BusPwm::BusPwm(const BusConfig &bc)
     }
     // if _needsRefresh is true (UI hack) we are using dithering (credit @dedehai & @zalatnaicsongor)
     if (dithering) _depth = 12; // fixed 8 bit depth PWM with 4 bit dithering (ESP8266 has no hardware to support dithering)
+    #else
+    // PWM/analog LED driving isn't implemented on this platform yet (WLED_MAX_ANALOG_CHANNELS is 0
+    // here, so this class is never actually instantiated) - bail out, but the rest of this method
+    // still needs to compile.
+    PinManager::deallocateMultiplePins(pins, numPins, PinOwner::BusPwm);
+    return;
     #endif
 
     for (unsigned i = 0; i < numPins; i++) {
       _pins[i] = bc.pins[i]; // store only after allocateMultiplePins() succeeded
       #ifdef ESP8266
       pinMode(_pins[i], OUTPUT);
-      #else
+      #elif defined(ARDUINO_ARCH_ESP32)
       unsigned channel = _ledcStart + i;
       #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
       ledcSetup(channel, _frequency, _depth - (dithering*4)); // with dithering _frequency doesn't really matter as resolution is 8 bit
@@ -544,12 +550,17 @@ void BusPwm::show() {
    const unsigned maxBri = analogPeriod;  // compute to clock cycle accuracy
    constexpr bool dithering = false;
    constexpr unsigned bitShift = 8;  // 256 clocks for dead time, ~3us at 80MHz
-#else
+#elif defined(ARDUINO_ARCH_ESP32)
   // if _needsRefresh is true (UI hack) we are using dithering (credit @dedehai & @zalatnaicsongor)
   // https://github.com/wled/WLED/pull/4115 and https://github.com/zalatnaicsongor/WLED/pull/1)
   const bool     dithering = _needsRefresh; // avoid working with bitfield
   const unsigned maxBri = (1<<_depth);      // possible values: 16384 (14), 8192 (13), 4096 (12), 2048 (11), 1024 (10), 512 (9) and 256 (8)
   const unsigned bitShift = dithering * 4;  // if dithering, _depth is 12 bit but LEDC channel is set to 8 bit (using 4 fractional bits)
+#else
+  // unreachable on this platform (see BusPwm constructor), but must still compile
+  const bool     dithering = false;
+  const unsigned maxBri = 1;
+  const unsigned bitShift = 0;
 #endif
   // use CIE brightness formula (linear + cubic) to approximate human eye perceived brightness
   // see: https://en.wikipedia.org/wiki/Lightness
@@ -588,7 +599,7 @@ void BusPwm::show() {
     #ifdef ESP8266
     //stopWaveform(_pins[i]);  // can cause the waveform to miss a cycle. instead we risk crossovers.
     startWaveformClockCycles(_pins[i], duty, analogPeriod - duty, 0, i ? _pins[0] : -1, hPoint, false);
-    #else
+    #elif defined(ARDUINO_ARCH_ESP32)
     unsigned channel = _ledcStart + i;
     unsigned gr = channel/8;  // high/low speed group
     unsigned ch = channel%8;  // group channel
@@ -644,7 +655,7 @@ void BusPwm::deallocatePins() {
     if (!PinManager::isPinOk(_pins[i])) continue;
     #ifdef ESP8266
     digitalWrite(_pins[i], LOW); //turn off PWM interrupt
-    #else
+    #elif defined(ARDUINO_ARCH_ESP32)
     #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
     if (_ledcStart < WLED_MAX_ANALOG_CHANNELS) ledcDetachPin(_pins[i]);
     #else
@@ -1680,7 +1691,7 @@ void BusManager::on() {
       }
     }
   }
-  #else
+  #elif defined(ARDUINO_ARCH_ESP32)
   static uint32_t nextResolve = 0;  // initial resolve is done on bus creation
   bool resolveNow = (millis() - nextResolve >= 600000); // wait at least 10 minutes between hostname resolutions (blocking call)
   for (auto &bus : busses) if (bus->isVirtual()) {
@@ -1693,6 +1704,8 @@ void BusManager::on() {
   if (resolveNow)
     nextResolve = millis();
   #endif
+  // Note: hostname-based network bus IP re-resolution (BusNetwork::resolveHostname) is
+  // ESP32-only for now; not yet wired up on RP2040 (see bus_manager.h/.cpp).
   #ifdef ESP32_DATA_IDLE_HIGH
   esp32RMTInvertIdle();
   #endif

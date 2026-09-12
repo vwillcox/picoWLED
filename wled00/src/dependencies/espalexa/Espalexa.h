@@ -41,6 +41,8 @@
 #ifdef ESPALEXA_ASYNC
  #ifdef ARDUINO_ARCH_ESP32
   #include <AsyncTCP.h>
+ #elif defined(ARDUINO_ARCH_RP2040)
+  #include <RPAsyncTCP.h>
  #else
   #include <ESPAsyncTCP.h>
  #endif
@@ -49,6 +51,9 @@
  #ifdef ARDUINO_ARCH_ESP32
   #include <WiFi.h>
   #include <WebServer.h> //if you get an error here please update to ESP32 arduino core 1.0.0
+ #elif defined(ARDUINO_ARCH_RP2040)
+  #include <WiFi.h>
+  #include <WebServer.h>
  #else
   #include <ESP8266WebServer.h>
   #include <ESP8266WiFi.h>

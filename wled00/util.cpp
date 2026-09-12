@@ -5,6 +5,8 @@
 #ifdef ESP8266
 #include "user_interface.h" // for bootloop detection
 #include <Hash.h>            // for SHA1 on ESP8266
+#elif defined(ARDUINO_ARCH_RP2040)
+// no Update.h/rollback, efuse, chip-info, or hardware SHA1 equivalents wired up yet on this platform
 #else
 #include <Update.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
@@ -1104,7 +1106,7 @@ void handleBootLoop() {
       ++bl_actiontracker;
       break;
     case BOOTLOOP_ACTION_OTA:
-#ifndef ESP8266
+#if !defined(ESP8266) && !defined(ARDUINO_ARCH_RP2040)
       if(Update.canRollBack()) {
         DEBUG_PRINTLN(F("Swapping boot partition..."));
         Update.rollBack(); // swap boot partition
@@ -1112,7 +1114,7 @@ void handleBootLoop() {
       ++bl_actiontracker;
       break;
 #else
-      // fall through
+      // fall through - no rollback mechanism wired up on this platform
 #endif
     case BOOTLOOP_ACTION_DUMP:
       dumpFilesToSerial();

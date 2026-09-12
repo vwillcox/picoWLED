@@ -321,7 +321,9 @@ void fillStr2MAC(uint8_t *mac, const char *str);
 int  findWiFi(bool doScan = false);
 bool isWiFiConfigured();
 void installIPv6RABlocker();
-void WiFiEvent(WiFiEvent_t event);
+#if defined(ESP8266) || defined(ARDUINO_ARCH_ESP32)
+void WiFiEvent(WiFiEvent_t event); // arduino-pico's WiFi library has no onEvent()/WiFiEvent_t equivalent yet
+#endif
 
 //um_manager.cpp
 typedef enum UM_Data_Types {
@@ -436,6 +438,9 @@ void userLoop();
 //util.cpp
 #ifdef ESP8266
 #define HW_RND_REGISTER RANDOM_REG32
+#elif defined(ARDUINO_ARCH_RP2040)
+#include "pico/rand.h" // RP2040: ring-oscillator entropy; RP2350: hardware TRNG
+#define HW_RND_REGISTER get_rand_32()
 #else // ESP32 family
 #include "soc/wdev_reg.h"
 #define HW_RND_REGISTER REG_READ(WDEV_RND_REG)
@@ -516,10 +521,10 @@ extern "C" {
   void *d_malloc(size_t);
   void *d_calloc(size_t, size_t);
   void *d_realloc_malloc(void *ptr, size_t size);
-  #ifndef ESP8266
-  inline void d_free(void *ptr) { heap_caps_free(ptr); }
-  #else
+  #if defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
   inline void d_free(void *ptr) { free(ptr); }
+  #else
+  inline void d_free(void *ptr) { heap_caps_free(ptr); }
   #endif
   #if defined(BOARD_HAS_PSRAM)
   // prefer PSRAM in p_xalloc functions, DRAM as fallback
@@ -534,12 +539,15 @@ extern "C" {
   #define p_free d_free
   #endif
 }
-#ifndef ESP8266
-inline size_t getFreeHeapSize() { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); } // returns free heap (ESP.getFreeHeap() can include other memory types)
-inline size_t getContiguousFreeHeap() { return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); } // returns largest contiguous free block
-#else
+#if defined(ESP8266)
 inline size_t getFreeHeapSize() { return ESP.getFreeHeap(); } // returns free heap
 inline size_t getContiguousFreeHeap() { return ESP.getMaxFreeBlockSize(); } // returns largest contiguous free block
+#elif defined(ARDUINO_ARCH_RP2040)
+inline size_t getFreeHeapSize() { return rp2040.getFreeHeap(); } // returns free heap
+inline size_t getContiguousFreeHeap() { return rp2040.getFreeHeap(); } // arduino-pico exposes no fragmentation-aware API; approximate with total free heap
+#else
+inline size_t getFreeHeapSize() { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); } // returns free heap (ESP.getFreeHeap() can include other memory types)
+inline size_t getContiguousFreeHeap() { return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); } // returns largest contiguous free block
 #endif
 #define BFRALLOC_NOBYTEACCESS    (1 << 0) // ESP32 has 32bit accessible DRAM (usually ~50kB free) that must not be byte-accessed
 #define BFRALLOC_PREFER_DRAM     (1 << 1) // prefer DRAM over PSRAM (can still use PSRAM for larger allocations if DRAM is starting to run low)
@@ -611,6 +619,17 @@ void updateBaudRate(uint32_t rate);
 void initServer();
 void serveMessage(AsyncWebServerRequest* request, uint16_t code, const String& headl, const String& subl="", byte optionT=255);
 void serveJsonError(AsyncWebServerRequest* request, uint16_t code, uint16_t error);
+
+// AsyncWebServerRequest::deferResponse() is a WLED/Aircoookie-only extension to
+// ESPAsyncWebServer (transparently re-queues the request for a silent retry), absent from
+// upstream esp32async/ESPAsyncWebServer used on RP2040. There, respond immediately with a
+// standard "buffer busy, retry" error instead of trying to replicate the re-queueing
+// internals of a fork we don't build against on this platform.
+#ifdef ARDUINO_ARCH_RP2040
+  #define WLED_DEFER_OR_BUSY(request) serveJsonError((request), 503, ERR_NOBUF)
+#else
+  #define WLED_DEFER_OR_BUSY(request) (request)->deferResponse()
+#endif
 void serveSettings(AsyncWebServerRequest* request, bool post = false);
 void serveSettingsJS(AsyncWebServerRequest* request);
 

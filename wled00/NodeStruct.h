@@ -28,6 +28,7 @@
 #define NODE_TYPE_ID_ESP32C5      41
 #define NODE_TYPE_ID_ESP32P4      42
 #define NODE_TYPE_ID_ESP32P4r3    45
+#define NODE_TYPE_ID_RP2040       46 // includes RP2350 (e.g. Raspberry Pi Pico 2 W) - arduino-pico defines ARDUINO_ARCH_RP2040 for both
 #define NODE_TYPE_ID_ESP32H21     43
 #define NODE_TYPE_ID_ESP32H4      44
 

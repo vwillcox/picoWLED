@@ -70,14 +70,17 @@ const wled_metadata_t __attribute__((section(BUILD_METADATA_SECTION))) WLED_BUIL
 #endif
 };
 
+// Note: arduino-pico's FPSTR() macro expands to a plain (const char*) cast rather than the
+// usual reinterpret_cast<const __FlashStringHelper*> other cores use, so it's spelled out
+// explicitly here instead (identical to what FPSTR does everywhere else).
 static const char repoString_s[] PROGMEM = WLED_REPO;
-const __FlashStringHelper* repoString = FPSTR(repoString_s);
+const __FlashStringHelper* repoString = reinterpret_cast<const __FlashStringHelper*>(repoString_s);
 
 static const char productString_s[] PROGMEM = WLED_PRODUCT_NAME;
-const __FlashStringHelper* productString = FPSTR(productString_s);
+const __FlashStringHelper* productString = reinterpret_cast<const __FlashStringHelper*>(productString_s);
 
 static const char brandString_s [] PROGMEM = WLED_BRAND;
-const __FlashStringHelper* brandString = FPSTR(brandString_s);
+const __FlashStringHelper* brandString = reinterpret_cast<const __FlashStringHelper*>(brandString_s);
 
 
 

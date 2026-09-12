@@ -197,6 +197,8 @@ void sendImprovInfoResponse() {
   char bString[32];
   #ifdef ESP8266
   strcpy(bString, "esp8266");
+  #elif defined(ARDUINO_ARCH_RP2040)
+  strcpy(bString, "rp2040");
   #else // ESP32
   strncpy(bString, ESP.getChipModel(), 31);
   #if CONFIG_IDF_TARGET_ESP32
@@ -232,14 +234,18 @@ void handleImprovWifiScan() {
   for (int i = 0; i < status; i++) {
     char rssiStr[8];
     sprintf(rssiStr, "%d", WiFi.RSSI(i));
-    #ifdef ESP8266
+    #if defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
     bool isOpen = WiFi.encryptionType(i) == ENC_TYPE_NONE;
     #else
     bool isOpen = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
     #endif
 
     char ssidStr[33] = {'\0'};
+    #ifdef ARDUINO_ARCH_RP2040
+    strlcpy(ssidStr, WiFi.SSID(i), sizeof(ssidStr)); // arduino-pico returns const char* here, not String
+    #else
     strlcpy(ssidStr, WiFi.SSID(i).c_str(), sizeof(ssidStr));
+    #endif
     const char *str[3] = {ssidStr, rssiStr, isOpen ? "NO":"YES"};
     sendImprovRPCResult(ImprovRPCType::Request_Scan, 3, str);
   }

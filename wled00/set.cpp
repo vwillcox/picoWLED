@@ -725,7 +725,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
   if (subPage == SUBPAGE_UM)
   {
     if (!requestJSONBufferLock(JSON_LOCK_SETTINGS)) {
-      request->deferResponse();
+      WLED_DEFER_OR_BUSY(request);
       return;
     }
 

@@ -819,7 +819,11 @@ void serializeInfo(JsonObject root)
   }
 
   JsonObject wifi_info = root.createNestedObject(F("wifi"));
+  #ifdef ARDUINO_ARCH_RP2040
+  wifi_info[F("bssid")] = wledBSSIDstr();
+  #else
   wifi_info[F("bssid")] = WiFi.BSSIDstr();
+  #endif
   int qrssi = WiFi.RSSI();
   wifi_info[F("rssi")] = qrssi;
   wifi_info[F("signal")] = getSignalQuality(qrssi);
@@ -866,6 +870,15 @@ void serializeInfo(JsonObject root)
   #ifndef WLED_DISABLE_OTA
   root[F("bootloaderSHA256")] = getBootloaderSHA256Hex();
   #endif
+#elif defined(ARDUINO_ARCH_RP2040)
+  root[F("arch")] = "rp2040";
+  root[F("core")] = "arduino-pico " ARDUINO_PICO_VERSION_STR;
+  root[F("clock")] = F_CPU / 1000000;
+  root[F("flash")] = 0; // no flash-size API exposed by arduino-pico yet
+  #ifdef WLED_DEBUG
+  root[F("maxalloc")] = getContiguousFreeHeap();
+  #endif
+  root[F("lwip")] = LWIP_VERSION_MAJOR;
 #else
   root[F("arch")] = "esp8266";
   root[F("core")] = ESP.getCoreVersion();
@@ -1076,7 +1089,11 @@ void serializeNetworks(JsonObject root)
     JsonObject node = networks.createNestedObject();
     node[F("ssid")]    = WiFi.SSID(i);
     node[F("rssi")]    = WiFi.RSSI(i);
+    #ifdef ARDUINO_ARCH_RP2040
+    node[F("bssid")]   = wledBSSIDstr(i);
+    #else
     node[F("bssid")]   = WiFi.BSSIDstr(i);
+    #endif
     node[F("channel")] = WiFi.channel(i);
     node[F("enc")]     = WiFi.encryptionType(i);
   }
@@ -1217,6 +1234,8 @@ void serializePins(JsonObject root)
           int analogRaw = 0;
           #ifdef ESP8266
           analogRaw = analogRead(A0) >> 2;   // convert 10bit read to 8bit, ESP8266 only has one analog pin
+          #elif defined(ARDUINO_ARCH_RP2040)
+          analogRaw = (analogRead(gpio)>>4); // arduino-pico's analogRead() works on any pin, no channel-capability check needed
           #else
           if (digitalPinToAnalogChannel(gpio) >= 0) {
             analogRaw = (analogRead(gpio)>>4); // right shift to match button value (8bit) see button.cpp
@@ -1381,7 +1400,7 @@ void serveJson(AsyncWebServerRequest* request)
   }
 
   if (!requestJSONBufferLock(JSON_LOCK_SERVEJSON)) {
-    request->deferResponse();    
+    WLED_DEFER_OR_BUSY(request);
     return;
   }
   // releaseJSONBufferLock() will be called when "response" is destroyed (from AsyncWebServer)

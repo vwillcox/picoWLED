@@ -557,17 +557,25 @@ void WLED::setup()
   if (strcmp(multiWiFi[0].clientSSID, DEFAULT_CLIENT_SSID) == 0 && !configBackupExists())
     showWelcomePage = true;
 
-  #ifndef ESP8266
+  #ifdef ARDUINO_ARCH_ESP32
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.persistent(true); // storing credentials in NVM fixes boot-up pause as connection is much faster, is disabled after first connection
   // ESP32 DNS name must be set before the first connection to the DHCP server; otherwise, the default ESP name (such as "esp32s3-267D0C") will be used.
   char hostname[64] = {'\0'};
   getWLEDhostname(hostname, sizeof(hostname), true);   // create DNS name based on mDNS name if set, or fall back to standard WLED server name
   WiFi.setHostname(hostname);
+  #elif defined(ARDUINO_ARCH_RP2040)
+  // no setScanMethod() equivalent on this platform
+  WiFi.persistent(false);
+  char hostname[64] = {'\0'};
+  getWLEDhostname(hostname, sizeof(hostname), true);
+  WiFi.setHostname(hostname);
   #else
   WiFi.persistent(false); // on ESP8266 using NVM for wifi config has no benefit of faster connection
   #endif
-  WiFi.onEvent(WiFiEvent);
+  #if defined(ESP8266) || defined(ARDUINO_ARCH_ESP32)
+  WiFi.onEvent(WiFiEvent); // arduino-pico's WiFi library has no onEvent() equivalent yet - reconnect/AP-client-tracking logic is not yet ported
+  #endif
   WiFi.mode(WIFI_STA); // enable scanning
 
 #if defined(ARDUINO_ARCH_ESP32) && (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2))
@@ -870,7 +878,11 @@ void WLED::initConnection()
         break;
       }
     }
+    #ifdef ARDUINO_ARCH_RP2040
+    WiFi.begin(multiWiFi[selectedWiFi].clientSSID, multiWiFi[selectedWiFi].clientPass, bssid); // no channel argument on this platform
+    #else
     WiFi.begin(multiWiFi[selectedWiFi].clientSSID, multiWiFi[selectedWiFi].clientPass, 0, bssid); // no harm if called multiple times
+    #endif
 #endif // WLED_ENABLE_WPA_ENTERPRISE
 
 #ifdef ARDUINO_ARCH_ESP32
@@ -878,6 +890,8 @@ void WLED::initConnection()
     DEBUG_PRINT(F("; WiFi sleep ")); DEBUG_PRINTLN(noWifiSleep ? F("disabled."):F("enabled."));
     WiFi.setTxPower(wifi_power_t(txPower));
     WiFi.setSleep(!noWifiSleep);
+#elif defined(ARDUINO_ARCH_RP2040)
+    // no setTxPower()/setSleep() equivalent on this platform yet
 #else // ESP8266 accepts a hostname set after WiFi interface initialization
     DEBUG_PRINT(F("WiFi sleep ")); DEBUG_PRINTLN(noWifiSleep ? F("disabled."):F("enabled."));
     wifi_set_sleep_type((noWifiSleep) ? NONE_SLEEP_T : MODEM_SLEEP_T);
@@ -988,6 +1002,8 @@ void WLED::handleConnection()
   if (apActive) {
 #ifdef ESP8266
     stac = wifi_softap_get_station_num();
+#elif defined(ARDUINO_ARCH_RP2040)
+    // no AP-client-count query wired up on this platform yet
 #else
     wifi_sta_list_t stationList;
     esp_wifi_ap_get_sta_list(&stationList);

@@ -127,6 +127,14 @@ constexpr unsigned WLED_BOARD = NODE_TYPE_ID_ESP8266;
   constexpr unsigned WLED_BOARD = NODE_TYPE_ID_ESP32C61;
 #endif
 
+#if defined(ARDUINO_ARCH_RP2040)
+// Capabilities of RP2040/RP2350 (arduino-pico core), e.g. Raspberry Pi Pico 2 W. EXPERIMENTAL.
+  // Cortex-M0+ (RP2040) / Cortex-M33 (RP2350) both have hardware single-precision FPU support
+  // via the pico-sdk's compiler-provided soft/hard float, but WLED hasn't been tuned for it yet.
+  // No parallel I2S LEDs driver, no RTC-memory heap concept, no IRAM-restricted heap.
+  constexpr unsigned WLED_BOARD = NODE_TYPE_ID_RP2040;
+#endif
+
 #if CONFIG_IDF_TARGET_ESP32P4
 // Capabilities of ESP32-P4
   #define WLED_HAVE_FAST_FLOAT  1     // has an FPU for fast floating point (single precision)

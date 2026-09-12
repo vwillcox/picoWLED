@@ -362,10 +362,22 @@ int findWiFi(bool doScan) {
     int rssi = -9999;
     size_t selected = (static_cast<size_t>(selectedWiFi) < multiWiFi.size()) ? static_cast<size_t>(selectedWiFi) : 0; // ensure valid starting index
     for (int o = 0; o < status; o++) {
-      DEBUG_PRINTF_P(PSTR(" SSID: %s (BSSID: %s) RSSI: %ddB\n"), WiFi.SSID(o).c_str(), WiFi.BSSIDstr(o).c_str(), WiFi.RSSI(o));
+      #ifdef ARDUINO_ARCH_RP2040
+      const char *ssid_o = WiFi.SSID(o); // arduino-pico returns const char* here, not String
+      uint8_t bssidBuf[6];
+      WiFi.BSSID((uint8_t)o, bssidBuf);
+      DEBUG_PRINTF_P(PSTR(" SSID: %s (BSSID: %s) RSSI: %ddB\n"), ssid_o, wledBSSIDstr(o).c_str(), WiFi.RSSI(o));
+      #else
+      const char *ssid_o = WiFi.SSID(o).c_str();
+      DEBUG_PRINTF_P(PSTR(" SSID: %s (BSSID: %s) RSSI: %ddB\n"), ssid_o, WiFi.BSSIDstr(o).c_str(), WiFi.RSSI(o));
+      #endif
       for (unsigned n = 0; n < multiWiFi.size(); n++)
-        if (!strcmp(WiFi.SSID(o).c_str(), multiWiFi[n].clientSSID)) {
+        if (!strcmp(ssid_o, multiWiFi[n].clientSSID)) {
+          #ifdef ARDUINO_ARCH_RP2040
+          bool foundBSSID = memcmp(multiWiFi[n].bssid, bssidBuf, 6) == 0;
+          #else
           bool foundBSSID = memcmp(multiWiFi[n].bssid, WiFi.BSSID(o), 6) == 0;
+          #endif
           // find the WiFi with the strongest signal (but keep priority of entry if signal difference is not big)
           if (foundBSSID || (n < selected && WiFi.RSSI(o) > rssi-10) || WiFi.RSSI(o) > rssi) {
             rssi = foundBSSID ? 0 : WiFi.RSSI(o); // RSSI is only ever negative
@@ -441,6 +453,7 @@ void installIPv6RABlocker() {
 static byte apClients = 0;
 
 //handle Ethernet connection event
+#if defined(ESP8266) || defined(ARDUINO_ARCH_ESP32)
 void WiFiEvent(WiFiEvent_t event)
 {
   switch (event) {
@@ -533,4 +546,5 @@ void WiFiEvent(WiFiEvent_t event)
       break;
   }
 }
+#endif // ESP8266 || ARDUINO_ARCH_ESP32
 

@@ -495,6 +495,9 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
     #ifdef ESP32
     if (!Wire.setPins(i2c_sda, i2c_scl)) { i2c_scl = i2c_sda = -1; } // this will fail if Wire is initialised (Wire.begin() called prior)
     else Wire.begin();
+    #elif defined(ARDUINO_ARCH_RP2040)
+    if (!Wire.setSDA(i2c_sda) || !Wire.setSCL(i2c_scl)) { i2c_scl = i2c_sda = -1; } // must be called before begin()
+    else Wire.begin();
     #else
     Wire.begin(i2c_sda, i2c_scl);
     #endif

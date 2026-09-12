@@ -121,7 +121,16 @@ public:
   void setMaxContentLength(int maxContentLength){ _maxContentLength = maxContentLength; }
   void onRequest(ArJsonRequestHandlerFunction fn){ _onRequest = fn; }
 
-  virtual bool canHandle(AsyncWebServerRequest *request) override final{
+  // Upstream esp32async/ESPAsyncWebServer (used on RP2040/RP2350) made AsyncWebHandler's
+  // canHandle()/isRequestHandlerTrivial() const; WLED's Aircoookie fork (ESP32/ESP8266)
+  // predates that change, so the qualifier has to be conditional to override correctly on both.
+  #ifdef ARDUINO_ARCH_RP2040
+  #define WLED_AJSON_HANDLER_CONST const
+  #else
+  #define WLED_AJSON_HANDLER_CONST
+  #endif
+
+  virtual bool canHandle(AsyncWebServerRequest *request) WLED_AJSON_HANDLER_CONST override final{
     if(!_onRequest)
       return false;
 
@@ -159,6 +168,8 @@ public:
       }
     }
   }
-  virtual bool isRequestHandlerTrivial() override final {return _onRequest ? false : true;}
+  virtual bool isRequestHandlerTrivial() WLED_AJSON_HANDLER_CONST override final {return _onRequest ? false : true;}
+
+  #undef WLED_AJSON_HANDLER_CONST
 };
 #endif

@@ -4,6 +4,9 @@
 
 #ifdef ESP8266
   #include <Updater.h>
+#elif defined(ARDUINO_ARCH_RP2040)
+  // arduino-pico has no Update.h/Updater.h equivalent yet; OTA is not implemented on this
+  // platform (see ota_update.cpp, whose body is entirely skipped here).
 #else
    #include <Update.h>
 #endif
@@ -15,6 +18,11 @@
 #define BUILD_METADATA_SECTION ".rodata_custom_desc"
 #elif defined(ESP8266)
 #define BUILD_METADATA_SECTION ".ver_number"
+#elif defined(ARDUINO_ARCH_RP2040)
+// No custom section support wired up for this platform yet; placing it in plain .rodata
+// still makes the struct compile and usable in-code, just not extractable by ESP-specific
+// out-of-band firmware-identification tooling.
+#define BUILD_METADATA_SECTION ".rodata"
 #endif
 
 

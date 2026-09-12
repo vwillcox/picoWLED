@@ -424,7 +424,7 @@ void initServer()
     bool isConfig = false;
 
     if (!requestJSONBufferLock(JSON_LOCK_SERVER)) {
-      request->deferResponse();
+      WLED_DEFER_OR_BUSY(request);
       return;
     }
 
