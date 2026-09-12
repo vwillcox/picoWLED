@@ -741,9 +741,22 @@ void WLED::initAP(bool resetAP)
   // AP/AP_STA mode when called (unlike ESP32/ESP8266, where it's accepted unconditionally
   // and applied whenever AP mode actually starts) - without this, it silently falls back
   // to arduino-pico's own default AP_STA gateway (192.168.4.1) instead of WLED's 4.3.2.1.
+  // Only *momentarily* enter AP_STA to let softAPConfig() store the IP (WiFiClass::_apIP,
+  // a plain member variable, not mode-dependent once set) - then drop straight back to
+  // pure WIFI_AP before softAP() actually brings the radio up, so the radio never lingers
+  // in genuine AP_STA dual mode. A from-scratch RP2040 WLED-alike project independently
+  // avoids ever using true AP_STA for the same reason (see their captive_portal.cpp
+  // comments). Worth keeping regardless - it's the more correct way to satisfy the
+  // softAPConfig() IP-storing quirk above - but note it did NOT, on its own, resolve a
+  // separately-observed STA-join reliability issue on real hardware (intermittent
+  // CYW43_LINK_BADAUTH blips / DHCP not completing); see project memory for that
+  // unresolved investigation before assuming this line is the fix for it.
   WiFi.mode(WIFI_AP_STA);
-  #endif
   WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
+  WiFi.mode(WIFI_AP);
+  #else
+  WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
+  #endif
   WiFi.softAP(apSSID, apPass, apChannel, apHide);
   #ifdef ARDUINO_ARCH_ESP32
   DEBUG_PRINT(F("access point maxTxPower set to ")); DEBUG_PRINTLN(txPower);
