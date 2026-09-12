@@ -736,6 +736,13 @@ void WLED::initAP(bool resetAP)
   #endif
   #endif
 
+  #ifdef ARDUINO_ARCH_RP2040
+  // arduino-pico's softAPConfig() only stores the requested IP if WiFi is already in
+  // AP/AP_STA mode when called (unlike ESP32/ESP8266, where it's accepted unconditionally
+  // and applied whenever AP mode actually starts) - without this, it silently falls back
+  // to arduino-pico's own default AP_STA gateway (192.168.4.1) instead of WLED's 4.3.2.1.
+  WiFi.mode(WIFI_AP_STA);
+  #endif
   WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP(apSSID, apPass, apChannel, apHide);
   #ifdef ARDUINO_ARCH_ESP32
@@ -798,6 +805,23 @@ void WLED::initConnection()
   apActive = false;           // the AP is physically torn down by WIFI_MODE_NULL
   delay(5);                   // give the WiFi stack time to complete the mode transition
   WiFi.setHostname(hostname);
+#elif defined(ARDUINO_ARCH_RP2040)
+  // arduino-pico's WIFI_AP_STA dual mode does not reliably support then completing a
+  // fresh STA join: verified via direct diagnostics that WiFi.status() gets stuck at
+  // WL_IDLE_STATUS forever when attempting WiFi.begin() while still in AP_STA mode
+  // (root cause: LwipIntfDev::begin() - the underlying network interface start routine -
+  // silently refuses to (re)start while its internal "_started" bookkeeping is left set
+  // from AP_STA setup, with no error surfaced up through WiFiClass). Cleanly exit AP mode
+  // first so the STA interface gets a genuine fresh start.
+  if (apActive) {
+    DEBUG_PRINTLN(F("WiFi mode reset: leaving AP mode before STA join."));
+    dnsServer.stop();
+    WiFi.softAPdisconnect(true);
+    apActive = false;
+    delay(5);
+  }
+  WiFi.mode(WIFI_STA);
+  delay(5);
 #endif
 
   if (multiWiFi.empty()) {                       // guard: handle empty WiFi list safely
