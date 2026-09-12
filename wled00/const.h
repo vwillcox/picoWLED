@@ -381,6 +381,13 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define TYPE_HUB75MATRIX_QS      66
 #define TYPE_HUB75MATRIX_MAX     71
 
+// Pimoroni "Unicorn" family integrated matrix boards (RP2040/RP2350 + PIO,
+// NOT HUB75 electrically - see BusPimoroniUnicornMatrix). Only Cosmic Unicorn
+// (32x32) is implemented so far; ids reserved for Galactic/Stellar siblings.
+#define TYPE_PIMORONI_UNICORN_MIN      72
+#define TYPE_PIMORONI_UNICORN_COSMIC   73  // Cosmic Unicorn, 32x32
+#define TYPE_PIMORONI_UNICORN_MAX      79
+
 //Network types (master broadcast) (80-95)
 #define TYPE_VIRTUAL_MIN         80
 #define TYPE_NET_DDP_RGB         80            //network DDP RGB bus (master broadcast bus)

@@ -9,6 +9,12 @@
 #include "src/dependencies/fastled_slim/fastled_slim.h"
 
 #endif
+
+#ifdef WLED_ENABLE_PIMORONI_UNICORN
+
+#include "hardware/pio.h"
+
+#endif
 /*
  * Class for addressing various light types
  */
@@ -171,7 +177,7 @@ class Bus {
     inline  bool     containsPixel(uint16_t pix) const          { return pix >= _start && pix < _start + _len; }
 
     static inline std::vector<LEDType> getLEDTypes()            { return {{TYPE_NONE, "", PSTR("None")}}; } // not used. just for reference for derived classes
-    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins
+    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : isPimoroniUnicorn(type) ? 0 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins; Pimoroni Unicorn boards have fixed, non-configurable pins
     static constexpr size_t   getNumberOfChannels(uint8_t type) { return hasWhite(type) + 3*hasRGB(type) + hasCCT(type); }
     static constexpr bool hasRGB(uint8_t type) {
       return !((type >= TYPE_WS2812_1CH && type <= TYPE_WS2812_WWA) || type == TYPE_ANALOG_1CH || type == TYPE_ANALOG_2CH || type == TYPE_ONOFF);
@@ -195,6 +201,7 @@ class Bus {
     static constexpr bool  isPWM(uint8_t type)        { return (type >= TYPE_ANALOG_MIN && type <= TYPE_ANALOG_MAX); }
     static constexpr bool  isVirtual(uint8_t type)    { return (type >= TYPE_VIRTUAL_MIN && type <= TYPE_VIRTUAL_MAX); }
     static constexpr bool  isHub75(uint8_t type)      { return (type >= TYPE_HUB75MATRIX_MIN && type <= TYPE_HUB75MATRIX_MAX); }
+    static constexpr bool  isPimoroniUnicorn(uint8_t type) { return (type >= TYPE_PIMORONI_UNICORN_MIN && type <= TYPE_PIMORONI_UNICORN_MAX); }
     static constexpr bool  is16bit(uint8_t type)      { return type == TYPE_UCS8903 || type == TYPE_UCS8904 || type == TYPE_SM16825; }
     static constexpr bool  mustRefresh(uint8_t type)  { return type == TYPE_TM1814; }
     static constexpr int   numPWMPins(uint8_t type)   { return (type - 40); }
@@ -448,6 +455,49 @@ class BusHub75Matrix : public Bus {
     static constexpr uint32_t IS_BLACK = 0x000000u;
     static constexpr uint32_t IS_DARKGREY = 0x333333u;
     static constexpr int PIN_COUNT = 14;
+};
+#endif
+
+#ifdef WLED_ENABLE_PIMORONI_UNICORN
+// Driver for Pimoroni's "Unicorn" family of RP2040/RP2350 boards with an
+// integrated PIO-driven RGB matrix (Cosmic/Galactic/Stellar Unicorn, sold
+// together as "Space Unicorns" for the Pico 2 W generation). NOT a HUB75
+// panel: pimoroni-pico's cosmic_unicorn.pio drives a proprietary bit-serial
+// protocol (single COLUMN_DATA line + clock/latch/blank, 4-bit row select)
+// rather than HUB75's parallel R1/G1/B1/R2/G2/B2 signal set, so this is a
+// distinct bus type rather than a variant of BusHub75Matrix. Only the Cosmic
+// Unicorn (32x32) variant is implemented; pin mapping and geometry are
+// currently hardcoded to that board (see bus_manager.cpp).
+class BusPimoroniUnicornMatrix : public Bus {
+  public:
+    BusPimoroniUnicornMatrix(const BusConfig &bc);
+    [[gnu::hot]] void setPixelColor(unsigned pix, uint32_t c) override;
+    [[gnu::hot]] uint32_t getPixelColor(unsigned pix) const override;
+    void show() override {} // writes already land directly in the freely-scanning DMA bitstream; nothing to flush
+    void setBrightness(uint8_t b) override;
+    size_t getPins(uint8_t* pinArray = nullptr) const override;
+    void cleanup();
+
+    ~BusPimoroniUnicornMatrix() {
+      cleanup();
+    }
+
+    static std::vector<LEDType> getLEDTypes(void);
+
+    static constexpr uint32_t BCD_FRAME_COUNT = 14; // matches the 14-bit gamma table in bus_manager.cpp
+
+  private:
+    unsigned _panelWidth = 0;
+    unsigned _panelHeight = 0;
+    uint32_t *_colors = nullptr;   // shadow buffer so getPixelColor() can return what was last written
+    uint8_t  *_bitstream = nullptr; // BCD (binary coded dimming) PWM bitstream fed to the PIO program via DMA
+    size_t    _bitstreamLength = 0;
+
+    PIO _pio = nullptr;
+    uint _sm = 0;
+    uint _smOffset = 0;
+    int  _dmaChannel = -1;
+    int  _dmaCtrlChannel = -1;
 };
 #endif
 

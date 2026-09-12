@@ -13,6 +13,10 @@
 #ifdef ESP8266
 #include "core_esp8266_waveform.h"
 #endif
+#ifdef WLED_ENABLE_PIMORONI_UNICORN
+#include "hardware/dma.h"
+#include "bus_pimoroni_unicorn.pio.h"
+#endif
 #include "bus_manager.h"
 #include "bus_wrapper.h"
 #include "wled.h"
@@ -1255,6 +1259,261 @@ size_t BusHub75Matrix::getPins(uint8_t* pinArray) const {
 #endif
 // ***************************************************************************
 
+#ifdef WLED_ENABLE_PIMORONI_UNICORN
+// Driver for Pimoroni Cosmic Unicorn (RP2040/RP2350 + integrated 32x32 RGB
+// matrix). Adapted from pimoroni-pico's CosmicUnicorn::init()/set_pixel()
+// (https://github.com/pimoroni/pimoroni-pico, MIT License, Copyright (c)
+// 2021 Pimoroni Ltd) with the audio/synth half of that class removed, since
+// WLED has no use for the board's onboard speaker. Pin numbers below match
+// that board's fixed wiring (not user-configurable, hence no PinManager UI).
+namespace {
+  // Pin mapping fixed by the Cosmic Unicorn PCB, see pimoroni-pico
+  // libraries/cosmic_unicorn/cosmic_unicorn.hpp
+  constexpr uint8_t UNICORN_COLUMN_CLOCK = 13;
+  constexpr uint8_t UNICORN_COLUMN_DATA  = 14;
+  constexpr uint8_t UNICORN_COLUMN_LATCH = 15;
+  constexpr uint8_t UNICORN_COLUMN_BLANK = 16;
+  constexpr uint8_t UNICORN_ROW_BIT_0    = 17; // ROW_BIT_0..3 are consecutive GPIOs 17-20
+
+  constexpr unsigned COSMIC_WIDTH  = 32;
+  constexpr unsigned COSMIC_HEIGHT = 32;
+  constexpr uint32_t COSMIC_ROW_COUNT = 16; // physical scan rows: 32x32 panel is scanned as two stacked 16-row halves
+  constexpr uint32_t COSMIC_BCD_FRAME_BYTES = 72; // 2 header + 64 pixel bytes (32 physical cols x2 halves) + 2 pad + 4 bcd-tick
+  constexpr uint32_t COSMIC_ROW_BYTES = BusPimoroniUnicornMatrix::BCD_FRAME_COUNT * COSMIC_BCD_FRAME_BYTES;
+  constexpr uint32_t COSMIC_BITSTREAM_LENGTH = COSMIC_ROW_COUNT * COSMIC_ROW_BYTES;
+
+  // 14-bit gamma-correction / dimming-curve lookup, vendored unmodified from
+  // pimoroni-pico's common/pimoroni_common.hpp (same license as above).
+  // v = (uint16_t)(powf((float)(n) / 255.0f, 2.2) * 16383.0f + 0.5f)
+  constexpr uint16_t UNICORN_GAMMA_14BIT[256] = {
+    0, 0, 0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 23, 28, 32,
+    37, 42, 48, 54, 61, 67, 75, 82, 90, 99, 108, 117, 127, 137, 148, 159,
+    170, 182, 195, 207, 221, 234, 249, 263, 278, 294, 310, 326, 343, 361, 379, 397,
+    416, 435, 455, 475, 496, 517, 539, 561, 583, 607, 630, 654, 679, 704, 730, 756,
+    783, 810, 838, 866, 894, 924, 953, 983, 1014, 1045, 1077, 1110, 1142, 1176, 1210, 1244,
+    1279, 1314, 1350, 1387, 1424, 1461, 1499, 1538, 1577, 1617, 1657, 1698, 1739, 1781, 1823, 1866,
+    1910, 1954, 1998, 2044, 2089, 2136, 2182, 2230, 2278, 2326, 2375, 2425, 2475, 2525, 2577, 2629,
+    2681, 2734, 2787, 2841, 2896, 2951, 3007, 3063, 3120, 3178, 3236, 3295, 3354, 3414, 3474, 3535,
+    3596, 3658, 3721, 3784, 3848, 3913, 3978, 4043, 4110, 4176, 4244, 4312, 4380, 4449, 4519, 4589,
+    4660, 4732, 4804, 4876, 4950, 5024, 5098, 5173, 5249, 5325, 5402, 5479, 5557, 5636, 5715, 5795,
+    5876, 5957, 6039, 6121, 6204, 6287, 6372, 6456, 6542, 6628, 6714, 6801, 6889, 6978, 7067, 7156,
+    7247, 7337, 7429, 7521, 7614, 7707, 7801, 7896, 7991, 8087, 8183, 8281, 8378, 8477, 8576, 8675,
+    8775, 8876, 8978, 9080, 9183, 9286, 9390, 9495, 9600, 9706, 9812, 9920, 10027, 10136, 10245, 10355,
+    10465, 10576, 10688, 10800, 10913, 11027, 11141, 11256, 11371, 11487, 11604, 11721, 11840, 11958, 12078, 12198,
+    12318, 12440, 12562, 12684, 12807, 12931, 13056, 13181, 13307, 13433, 13561, 13688, 13817, 13946, 14076, 14206,
+    14337, 14469, 14602, 14735, 14868, 15003, 15138, 15273, 15410, 15547, 15685, 15823, 15962, 16102, 16242, 16383};
+} // namespace
+
+BusPimoroniUnicornMatrix::BusPimoroniUnicornMatrix(const BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
+  _valid = false;
+  _hasRgb = true;
+  _hasWhite = false;
+
+  if (bc.type != TYPE_PIMORONI_UNICORN_COSMIC) {
+    DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: unsupported Unicorn variant"));
+    return;
+  }
+
+  _panelWidth  = COSMIC_WIDTH;
+  _panelHeight = COSMIC_HEIGHT;
+  _len = _panelWidth * _panelHeight;
+
+  const uint8_t matrixPins[] = {
+    UNICORN_COLUMN_CLOCK, UNICORN_COLUMN_DATA, UNICORN_COLUMN_LATCH, UNICORN_COLUMN_BLANK,
+    uint8_t(UNICORN_ROW_BIT_0+0), uint8_t(UNICORN_ROW_BIT_0+1), uint8_t(UNICORN_ROW_BIT_0+2), uint8_t(UNICORN_ROW_BIT_0+3)
+  };
+  size_t nAllocated = 0;
+  for (uint8_t pin : matrixPins) {
+    if (!PinManager::allocatePin(pin, true, PinOwner::PimoroniUnicorn)) break;
+    nAllocated++;
+  }
+  if (nAllocated != sizeof(matrixPins)) {
+    DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: pin allocation failed"));
+    for (size_t i = 0; i < nAllocated; i++) PinManager::deallocatePin(matrixPins[i], PinOwner::PimoroniUnicorn);
+    return;
+  }
+
+  _colors = static_cast<uint32_t*>(d_calloc(_len, sizeof(uint32_t)));
+  _bitstreamLength = COSMIC_BITSTREAM_LENGTH;
+  _bitstream = static_cast<uint8_t*>(d_calloc(_bitstreamLength, 1)); // must be 32-bit aligned for DMA; d_calloc satisfies this
+  if (!_colors || !_bitstream) {
+    DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: buffer allocation failed"));
+    if (_colors) d_free(_colors);
+    if (_bitstream) d_free(_bitstream);
+    _colors = nullptr;
+    _bitstream = nullptr;
+    PinManager::deallocateMultiplePins(matrixPins, sizeof(matrixPins), PinOwner::PimoroniUnicorn);
+    return;
+  }
+
+  // initialise the bcd timing values and row selects in the bitstream (fixed for the lifetime of the bus)
+  for (uint32_t row = 0; row < COSMIC_ROW_COUNT; row++) {
+    for (uint32_t frame = 0; frame < BCD_FRAME_COUNT; frame++) {
+      uint8_t *p = &_bitstream[row * COSMIC_ROW_BYTES + (COSMIC_BCD_FRAME_BYTES * frame)];
+      p[0] = 64 - 1; // row pixel count (two 32px halves side by side)
+      p[1] = row;
+      uint32_t bcdTicks = (1u << frame);
+      p[68] = (bcdTicks &       0xff) >>  0;
+      p[69] = (bcdTicks &     0xff00) >>  8;
+      p[70] = (bcdTicks &   0xff0000) >> 16;
+      p[71] = (bcdTicks & 0xff000000) >> 24;
+    }
+  }
+
+  for (uint8_t pin : matrixPins) { gpio_init(pin); gpio_set_dir(pin, GPIO_OUT); }
+  gpio_put(UNICORN_COLUMN_BLANK, true); // keep output disabled until the PIO program takes over
+
+  _pio = pio0;
+  int sm = pio_claim_unused_sm(_pio, false);
+  if (sm < 0) {
+    DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: no free PIO state machine"));
+    d_free(_colors); d_free(_bitstream);
+    _colors = nullptr; _bitstream = nullptr;
+    PinManager::deallocateMultiplePins(matrixPins, sizeof(matrixPins), PinOwner::PimoroniUnicorn);
+    return;
+  }
+  _sm = sm;
+  _smOffset = pio_add_program(_pio, &cosmic_unicorn_program);
+
+  for (uint8_t pin : matrixPins) pio_gpio_init(_pio, pin);
+
+  const uint pinsToSet = (1u << UNICORN_COLUMN_BLANK) | (0b1111u << UNICORN_ROW_BIT_0);
+  pio_sm_set_pins_with_mask(_pio, _sm, pinsToSet, pinsToSet);
+  pio_sm_set_consecutive_pindirs(_pio, _sm, UNICORN_COLUMN_CLOCK, 8, true);
+
+  pio_sm_config c = cosmic_unicorn_program_get_default_config(_smOffset);
+  sm_config_set_out_shift(&c, true, true, 32);
+  sm_config_set_out_pins(&c, UNICORN_ROW_BIT_0, 4);
+  sm_config_set_set_pins(&c, UNICORN_COLUMN_DATA, 3);
+  sm_config_set_sideset_pins(&c, UNICORN_COLUMN_CLOCK);
+  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+  _dmaChannel = dma_claim_unused_channel(false);
+  _dmaCtrlChannel = dma_claim_unused_channel(false);
+  if (_dmaChannel < 0 || _dmaCtrlChannel < 0) {
+    DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: no free DMA channel"));
+    if (_dmaChannel >= 0) dma_channel_unclaim(_dmaChannel);
+    if (_dmaCtrlChannel >= 0) dma_channel_unclaim(_dmaCtrlChannel);
+    pio_sm_unclaim(_pio, _sm);
+    pio_remove_program(_pio, &cosmic_unicorn_program, _smOffset);
+    d_free(_colors); d_free(_bitstream);
+    _colors = nullptr; _bitstream = nullptr;
+    PinManager::deallocateMultiplePins(matrixPins, sizeof(matrixPins), PinOwner::PimoroniUnicorn);
+    return;
+  }
+
+  // ctrl channel re-arms the data channel's read address every time it finishes,
+  // making the whole transfer loop forever without CPU intervention
+  const uint32_t bitstreamAddr = reinterpret_cast<uint32_t>(_bitstream);
+  dma_channel_config ctrlCfg = dma_channel_get_default_config(_dmaCtrlChannel);
+  channel_config_set_transfer_data_size(&ctrlCfg, DMA_SIZE_32);
+  channel_config_set_read_increment(&ctrlCfg, false);
+  channel_config_set_write_increment(&ctrlCfg, false);
+  channel_config_set_chain_to(&ctrlCfg, _dmaChannel);
+  dma_channel_configure(_dmaCtrlChannel, &ctrlCfg,
+    &dma_hw->ch[_dmaChannel].read_addr, &bitstreamAddr, 1, false);
+
+  dma_channel_config dataCfg = dma_channel_get_default_config(_dmaChannel);
+  channel_config_set_transfer_data_size(&dataCfg, DMA_SIZE_32);
+  channel_config_set_dreq(&dataCfg, pio_get_dreq(_pio, _sm, true));
+  channel_config_set_chain_to(&dataCfg, _dmaCtrlChannel);
+  dma_channel_configure(_dmaChannel, &dataCfg,
+    &_pio->txf[_sm], nullptr, _bitstreamLength / 4, false);
+
+  pio_sm_init(_pio, _sm, _smOffset, &c);
+  pio_sm_set_enabled(_pio, _sm, true);
+  dma_start_channel_mask(1u << _dmaCtrlChannel);
+
+  _valid = true;
+  DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: Cosmic Unicorn (32x32) initialised"));
+}
+
+[[gnu::hot]] void BusPimoroniUnicornMatrix::setPixelColor(unsigned pix, uint32_t c) {
+  if (!_valid || pix >= _len) return;
+
+  _colors[pix] = c;
+
+  // pix is row-major (x = pix % width, y = pix / width) like BusHub75Matrix
+  int x = int(pix % _panelWidth);
+  int y = int(pix / _panelWidth);
+
+  // Cosmic Unicorn scan-order remap: physical panel is two stacked 16-row
+  // halves scanned in parallel, addressed as one wide 64-column virtual row.
+  // Verbatim logic from CosmicUnicorn::set_pixel() (see file header credit).
+  x = (COSMIC_WIDTH - 1) - x;
+  y = (COSMIC_HEIGHT - 1) - y;
+  if (y < 16) x += 32;
+  else        y -= 16;
+
+  uint16_t gammaR = UNICORN_GAMMA_14BIT[R(c)];
+  uint16_t gammaG = UNICORN_GAMMA_14BIT[G(c)];
+  uint16_t gammaB = UNICORN_GAMMA_14BIT[B(c)];
+
+  for (uint32_t frame = 0; frame < BCD_FRAME_COUNT; frame++) {
+    uint8_t *p = &_bitstream[uint32_t(y) * COSMIC_ROW_BYTES + (COSMIC_BCD_FRAME_BYTES * frame) + 2 + uint32_t(x)];
+    *p = uint8_t((gammaB & 1) << 0) | uint8_t((gammaG & 1) << 1) | uint8_t((gammaR & 1) << 2);
+    gammaR >>= 1; gammaG >>= 1; gammaB >>= 1;
+  }
+}
+
+uint32_t BusPimoroniUnicornMatrix::getPixelColor(unsigned pix) const {
+  if (!_valid || pix >= _len || !_colors) return 0;
+  return _colors[pix];
+}
+
+void BusPimoroniUnicornMatrix::setBrightness(uint8_t b) {
+  _bri = b;
+  // brightness is applied by BusManager/segment color math before setPixelColor() is called,
+  // matching how other digital buses behave (no separate hardware brightness control here).
+}
+
+size_t BusPimoroniUnicornMatrix::getPins(uint8_t* pinArray) const {
+  if (pinArray) {
+    pinArray[0] = UNICORN_COLUMN_CLOCK; pinArray[1] = UNICORN_COLUMN_DATA;
+    pinArray[2] = UNICORN_COLUMN_LATCH; pinArray[3] = UNICORN_COLUMN_BLANK;
+    pinArray[4] = UNICORN_ROW_BIT_0;    pinArray[5] = UNICORN_ROW_BIT_0+1;
+    pinArray[6] = UNICORN_ROW_BIT_0+2;  pinArray[7] = UNICORN_ROW_BIT_0+3;
+  }
+  return 8;
+}
+
+void BusPimoroniUnicornMatrix::cleanup() {
+  if (!_valid) return;
+  _valid = false;
+
+  pio_sm_set_enabled(_pio, _sm, false);
+  const uint pinsToSet = (1u << UNICORN_COLUMN_BLANK) | (0b1111u << UNICORN_ROW_BIT_0);
+  pio_sm_set_pins_with_mask(_pio, _sm, pinsToSet, pinsToSet);
+
+  dma_channel_abort(_dmaCtrlChannel);
+  dma_channel_abort(_dmaChannel);
+  dma_channel_unclaim(_dmaCtrlChannel);
+  dma_channel_unclaim(_dmaChannel);
+
+  pio_sm_unclaim(_pio, _sm);
+  pio_remove_program(_pio, &cosmic_unicorn_program, _smOffset);
+
+  const uint8_t matrixPins[] = {
+    UNICORN_COLUMN_CLOCK, UNICORN_COLUMN_DATA, UNICORN_COLUMN_LATCH, UNICORN_COLUMN_BLANK,
+    uint8_t(UNICORN_ROW_BIT_0+0), uint8_t(UNICORN_ROW_BIT_0+1), uint8_t(UNICORN_ROW_BIT_0+2), uint8_t(UNICORN_ROW_BIT_0+3)
+  };
+  PinManager::deallocateMultiplePins(matrixPins, sizeof(matrixPins), PinOwner::PimoroniUnicorn);
+
+  if (_colors) d_free(_colors);
+  if (_bitstream) d_free(_bitstream);
+  _colors = nullptr;
+  _bitstream = nullptr;
+  DEBUGBUS_PRINTLN(F("BusPimoroniUnicornMatrix: shut down"));
+}
+
+std::vector<LEDType> BusPimoroniUnicornMatrix::getLEDTypes() {
+  return {
+    {TYPE_PIMORONI_UNICORN_COSMIC, "H", PSTR("Pimoroni Cosmic Unicorn (32x32)")},
+  };
+}
+#endif
+// ***************************************************************************
+
 BusPlaceholder::BusPlaceholder(const BusConfig &bc)
 : Bus(bc.type, bc.start, bc.autoWhite, bc.count, bc.reversed, bc.refreshReq)
 , _colorOrder(bc.colorOrder)
@@ -1313,6 +1572,10 @@ int BusManager::add(const BusConfig &bc, bool placeholder) {
   } else if (Bus::isHub75(bc.type)) {
     busses.push_back(make_unique<BusHub75Matrix>(bc));
 #endif
+#ifdef WLED_ENABLE_PIMORONI_UNICORN
+  } else if (Bus::isPimoroniUnicorn(bc.type)) {
+    busses.push_back(make_unique<BusPimoroniUnicornMatrix>(bc));
+#endif
   } else if (Bus::isDigital(bc.type)) {
     busses.push_back(make_unique<BusDigital>(bc));
   } else if (Bus::isOnOff(bc.type)) {
@@ -1346,6 +1609,9 @@ String BusManager::getLEDTypesJSONString() {
   //json += LEDTypesToJson(BusVirtual::getLEDTypes());
   #ifdef WLED_ENABLE_HUB75MATRIX
   json += LEDTypesToJson(BusHub75Matrix::getLEDTypes());
+  #endif
+  #ifdef WLED_ENABLE_PIMORONI_UNICORN
+  json += LEDTypesToJson(BusPimoroniUnicornMatrix::getLEDTypes());
   #endif
 
   json.setCharAt(json.length()-1, ']'); // replace last comma with bracket
