@@ -229,7 +229,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
       if (s >= WLED_MAX_BUSSES) break; // only counts physical buses
       uint8_t pins[OUTPUT_MAX_PINS] = {255, 255, 255, 255, 255};
       JsonArray pinArr = elm["pin"];
-      if (pinArr.size() == 0) continue;
+      if (pinArr.size() == 0 && Bus::getNumberOfPins(elm["type"] | TYPE_WS2812_RGB) > 0) continue; // buses with fixed pins (e.g. Pimoroni Unicorn) store none
       //pins[0] = pinArr[0];
       unsigned i = 0;
       for (int p : pinArr) {

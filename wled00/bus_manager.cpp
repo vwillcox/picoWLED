@@ -1497,7 +1497,8 @@ BusPimoroniUnicornMatrix::BusPimoroniUnicornMatrix(const BusConfig &bc) : Bus(bc
 [[gnu::hot]] void BusPimoroniUnicornMatrix::setPixelColor(unsigned pix, uint32_t c) {
   if (!_valid || pix >= _len) return;
 
-  _colors[pix] = c;
+  _colors[pix] = c;          // keep unscaled color for getPixelColor()
+  c = color_fade(c, _bri, true); // apply brightness
 
   // pix is row-major (x = pix % width, y = pix / width) like BusHub75Matrix
   int x = int(pix % _panelWidth);
@@ -1529,18 +1530,13 @@ uint32_t BusPimoroniUnicornMatrix::getPixelColor(unsigned pix) const {
 
 void BusPimoroniUnicornMatrix::setBrightness(uint8_t b) {
   _bri = b;
-  // brightness is applied by BusManager/segment color math before setPixelColor() is called,
-  // matching how other digital buses behave (no separate hardware brightness control here).
+  // brightness is applied in setPixelColor(), like BusDigital (no hardware brightness control here)
 }
 
 size_t BusPimoroniUnicornMatrix::getPins(uint8_t* pinArray) const {
-  if (pinArray) {
-    pinArray[0] = UNICORN_COLUMN_CLOCK; pinArray[1] = UNICORN_COLUMN_DATA;
-    pinArray[2] = UNICORN_COLUMN_LATCH; pinArray[3] = UNICORN_COLUMN_BLANK;
-    pinArray[4] = UNICORN_ROW_BIT_0;    pinArray[5] = UNICORN_ROW_BIT_0+1;
-    pinArray[6] = UNICORN_ROW_BIT_0+2;  pinArray[7] = UNICORN_ROW_BIT_0+3;
-  }
-  return 8;
+  // fixed board wiring, not user-configurable (Bus::getNumberOfPins() is 0 for this type);
+  // callers pass buffers of OUTPUT_MAX_PINS (5), too small for the 8 GPIOs used
+  return 0;
 }
 
 void BusPimoroniUnicornMatrix::cleanup() {

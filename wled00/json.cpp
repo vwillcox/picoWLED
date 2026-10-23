@@ -1239,7 +1239,7 @@ void serializePins(JsonObject root)
           #ifdef ESP8266
           analogRaw = analogRead(A0) >> 2;   // convert 10bit read to 8bit, ESP8266 only has one analog pin
           #elif defined(ARDUINO_ARCH_RP2040)
-          analogRaw = (analogRead(gpio)>>4); // arduino-pico's analogRead() works on any pin, no channel-capability check needed
+          analogRaw = (analogRead(gpio)>>2); // arduino-pico's analogRead() defaults to 10bit and works on any pin, no channel-capability check needed
           #else
           if (digitalPinToAnalogChannel(gpio) >= 0) {
             analogRaw = (analogRead(gpio)>>4); // right shift to match button value (8bit) see button.cpp

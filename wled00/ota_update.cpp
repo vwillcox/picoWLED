@@ -212,7 +212,7 @@ static void validateGzippedOTA(UpdateContext* context) {
   if (!Update.hasError()) {
     const auto& buf = context->releaseMetadataBuffer;
     if (Update.write(const_cast<uint8_t*>(buf.data()), buf.size()) != buf.size()) {
-      DEBUG_PRINTF_P(PSTR("OTA write failed on final chunk: %s\n"), UPDATE_ERROR_STR(Update));
+      DEBUG_PRINTF_P(PSTR("OTA write failed on final chunk: %s\n"), String(UPDATE_ERROR_STR(Update)).c_str()); // macro returns String on ESP8266
     }
   }
 
@@ -438,7 +438,7 @@ void handleOTAData(AsyncWebServerRequest *request, size_t index, uint8_t *data, 
 
   if (!Update.hasError()) {
     if (Update.write(data, len) != len) {
-      DEBUG_PRINTF_P(PSTR("OTA write failed on chunk %zu: %s\n"), index, UPDATE_ERROR_STR(Update));
+      DEBUG_PRINTF_P(PSTR("OTA write failed on chunk %zu: %s\n"), index, String(UPDATE_ERROR_STR(Update)).c_str()); // macro returns String on ESP8266/RP2040
     }
   }
 
