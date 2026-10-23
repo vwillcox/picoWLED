@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="/images/wled_logo_akemi.png">
+  <img src="/images/picowled_logo.svg" alt="picoWLED" width="600"><br>
   <a href="https://github.com/vwillcox/picoWLED/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vwillcox/picoWLED?color=blue&style=flat-square"></a>
 </p>
 
