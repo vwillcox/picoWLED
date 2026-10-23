@@ -1,13 +1,56 @@
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
-  <a href="https://github.com/wled-dev/WLED/releases"><img src="https://img.shields.io/github/release/wled-dev/WLED.svg?style=flat-square"></a>
-  <a href="https://raw.githubusercontent.com/wled-dev/WLED/main/LICENSE"><img src="https://img.shields.io/github/license/wled-dev/wled?color=blue&style=flat-square"></a>
-  <a href="https://wled.discourse.group"><img src="https://img.shields.io/discourse/topics?colorB=blue&label=forum&server=https%3A%2F%2Fwled.discourse.group%2F&style=flat-square"></a>
-  <a href="https://discord.gg/QAh7wJHrRM"><img src="https://img.shields.io/discord/473448917040758787.svg?colorB=blue&label=discord&style=flat-square"></a>
-  <a href="https://kno.wled.ge"><img src="https://img.shields.io/badge/quick_start-wiki-blue.svg?style=flat-square"></a>
-  <a href="https://github.com/Aircoookie/WLED-App"><img src="https://img.shields.io/badge/app-wled-blue.svg?style=flat-square"></a>
-  <a href="https://gitpod.io/#https://github.com/wled-dev/WLED"><img src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?style=flat-square&logo=gitpod"></a>
+  <a href="https://github.com/vwillcox/picoWLED/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vwillcox/picoWLED?color=blue&style=flat-square"></a>
 </p>
+
+# picoWLED ✨
+
+**A loving fork of [WLED](https://github.com/wled/WLED) that brings it to Raspberry Pi Pico–based LED displays, starting with the Pimoroni Cosmic Unicorn.**
+
+WLED is a wonderful project, and picoWLED aims to stay close to it and compatible with it. You get the same web UI, JSON API, effects, segments and presets, and the WLED apps work with it. The difference is that it runs on the RP2040 / RP2350 instead of an ESP32 or ESP8266.
+
+> picoWLED is an independent, unofficial fork. It is **not** supported by the WLED team, so please don't take picoWLED problems to WLED's issue tracker, Discord or forum. Open an issue [here](https://github.com/vwillcox/picoWLED/issues) instead.
+
+## 🧪 Status: experimental
+
+| Board | Build environment | Status |
+|---|---|---|
+| Pimoroni Cosmic Unicorn 32×32, Pico W (RP2040) | `rpipicow_cosmicunicorn` | Runs on real hardware: matrix output, WiFi, web UI and app |
+| Pimoroni Cosmic Unicorn 32×32, Pico 2 W (RP2350) | `rpipico2w_cosmicunicorn` | Builds; not yet tested on hardware |
+
+The Cosmic Unicorn's matrix is driven by a dedicated bus type (`BusPimoroniUnicornMatrix`). Its PIO program and scan logic are adapted from Pimoroni's [pimoroni-pico](https://github.com/pimoroni/pimoroni-pico) library (MIT License, © Pimoroni Ltd).
+
+### Known limitations
+- **No MQTT, ESP-NOW or infrared.** These are disabled at build time because no RP2040-compatible libraries are available for them.
+- **Setting "AP opens" to "Always" does not work.** The device opens a hotspot named after your router instead of joining it, so leave this on the default ("No connection after boot").
+- **Some UDP services may not start.** The arduino-pico core can only open 7 UDP sockets, which is fewer than WLED normally uses. Depending on the order things start in, DDP or the captive-portal DNS may be unavailable.
+- **The firmware validation check can miss.** Browser OTA uses arduino-pico's Updater, and the compatibility check may not find the firmware metadata. If an update is rejected, tick "Ignore firmware validation" to install it.
+
+## 🔧 Building and flashing
+
+Requires [PlatformIO](https://platformio.org/) and Node.js.
+
+```bash
+npm ci && npm run build                      # build the web UI
+pio run -e rpipicow_cosmicunicorn            # Cosmic Unicorn with Pico W (RP2040)
+pio run -e rpipico2w_cosmicunicorn           # Cosmic Unicorn with Pico 2 W (RP2350)
+```
+
+1. Hold **BOOTSEL** while plugging the Pico into USB. It appears as a USB drive.
+2. Copy `.pio/build/<environment>/firmware.uf2` onto that drive.
+3. On first boot, connect to the `WLED-AP` hotspot (password `wled1234`) and configure WiFi, just as with WLED.
+
+`rpipicow_cosmicunicorn_debug` builds the same firmware with serial debug logging enabled.
+
+## ❤️ Credits
+
+All the credit for WLED goes to [Aircoookie](https://github.com/Aircoookie) and the [WLED contributors](https://kno.wled.ge/about/contributors/). picoWLED is licensed under the same [EUPL v1.2](LICENSE) as WLED.
+
+---
+
+## About WLED
+
+The rest of this README is WLED's own introduction, kept as it is. The features and documentation it describes are for upstream WLED on ESP32 or ESP8266, and not every feature is available in picoWLED yet.
 
 # Welcome to WLED! ✨
 
